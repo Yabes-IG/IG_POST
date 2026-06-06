@@ -76,8 +76,8 @@ jobs:
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          if [ ! -f "$FOLDER/reel.mp4" ]; then
-            echo "::error::Folder $FOLDER exists but missing reel.mp4 — failing."
+          if [ ! -f "$FOLDER/reel.mp4" ] && [ ! -f "$FOLDER/image.png" ] && [ ! -f "$FOLDER/image.jpg" ]; then
+            echo "::error::Folder $FOLDER missing reel.mp4 OR image.png/jpg — failing."
             exit 1
           fi
           if [ ! -f "$FOLDER/spec.json" ]; then

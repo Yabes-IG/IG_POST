@@ -1,23 +1,20 @@
 #!/usr/bin/env node
-// IG Reels publisher — pre-rendered MP4 path.
+// IG publisher — pre-rendered MP4 (REELS) or static image (IMAGE feed post).
 //
 // Usage:
-//   node src/publish.js --folder=IGPOST/260605
+//   node src/publish.js --folder=IGPOST/260605            # REEL or IMAGE auto-detect
 //   node src/publish.js --folder=IGPOST/260605 --skip-publish
+//
+// Auto-detection by file in folder:
+//   - reel.mp4               -> media_type=REELS, video_url
+//   - image.png / image.jpg  -> media_type=IMAGE, image_url
+//   (If both exist, REELS wins.)
 //
 // Required env:
 //   IG_USER_ID         — IG Business Account ID (17-digit, starts 17841)
 //   IG_ACCESS_TOKEN    — long-lived user access token (60d)
-//   GITHUB_TOKEN       — for gh release create (auto-provisioned in Actions)
+//   GITHUB_TOKEN       — for gh release create (auto in Actions)
 //   GITHUB_REPOSITORY  — owner/repo (auto in Actions, e.g. Yabes-IG/IG_POST)
-//
-// What it does:
-//   1. Read {folder}/spec.json for caption + optional thumbOffsetMs
-//   2. Verify {folder}/reel.mp4 exists
-//   3. gh release create with a tag based on the folder name + upload reel.mp4
-//   4. POST to Graph API /{IG_USER_ID}/media with the public release-asset URL
-//   5. Poll the creation_id until FINISHED (~30-90s)
-//   6. POST to /{IG_USER_ID}/media_publish — done
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,21 +30,32 @@ if (!folderArg) {
 
 const FOLDER = folderArg.replace(/\/+$/, '');
 const SPEC_PATH = path.join(FOLDER, 'spec.json');
-const REEL_PATH = path.join(FOLDER, 'reel.mp4');
-
 if (!fs.existsSync(SPEC_PATH)) {
   console.error(`Missing ${SPEC_PATH}`);
   process.exit(1);
 }
-if (!fs.existsSync(REEL_PATH)) {
-  console.error(`Missing ${REEL_PATH}`);
+
+// ─── Auto-detect content type ───────────────────────────────────────────────
+const reelPath = path.join(FOLDER, 'reel.mp4');
+const imgPngPath = path.join(FOLDER, 'image.png');
+const imgJpgPath = path.join(FOLDER, 'image.jpg');
+
+let mediaPath, mediaType, urlField, fileName;
+if (fs.existsSync(reelPath)) {
+  mediaPath = reelPath; mediaType = 'REELS'; urlField = 'video_url'; fileName = 'reel.mp4';
+} else if (fs.existsSync(imgPngPath)) {
+  mediaPath = imgPngPath; mediaType = 'IMAGE'; urlField = 'image_url'; fileName = 'image.png';
+} else if (fs.existsSync(imgJpgPath)) {
+  mediaPath = imgJpgPath; mediaType = 'IMAGE'; urlField = 'image_url'; fileName = 'image.jpg';
+} else {
+  console.error(`No reel.mp4 or image.png/jpg in ${FOLDER}`);
   process.exit(1);
 }
 
 const spec = JSON.parse(fs.readFileSync(SPEC_PATH, 'utf8'));
-const folderName = path.basename(FOLDER); // "260605"
-const tag = `reel-${folderName}-${Date.now()}`;
-const title = spec.title || `Reel ${folderName}`;
+const folderName = path.basename(FOLDER);
+const tag = `${mediaType.toLowerCase()}-${folderName}-${Date.now()}`;
+const title = spec.title || `${mediaType === 'REELS' ? 'Reel' : 'Post'} ${folderName}`;
 const caption = spec.caption || '';
 const thumbOffsetMs = spec.thumbOffsetMs ?? 1000;
 
@@ -61,35 +69,37 @@ if (!IG_USER_ID || !IG_ACCESS_TOKEN || !GH_REPO) {
 
 const log = (...args) => console.log('[publish]', ...args);
 const sh = (cmd) => execSync(cmd, { stdio: 'inherit' });
-const shCapture = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-log(`folder: ${FOLDER}`);
-log(`tag:    ${tag}`);
-log(`title:  ${title}`);
-log(`caption: ${caption.slice(0, 80)}${caption.length > 80 ? '…' : ''}`);
-log(`reel:   ${REEL_PATH} (${(fs.statSync(REEL_PATH).size / 1e6).toFixed(2)} MB)`);
+log(`folder:     ${FOLDER}`);
+log(`media_type: ${mediaType}`);
+log(`file:       ${fileName} (${(fs.statSync(mediaPath).size / 1e6).toFixed(2)} MB)`);
+log(`tag:        ${tag}`);
+log(`title:      ${title}`);
+log(`caption:    ${caption.slice(0, 80)}${caption.length > 80 ? '…' : ''}`);
 
-// ─── 1. Upload reel.mp4 as a GitHub Release asset (public URL for Meta) ─────
-log('Creating GitHub Release + uploading reel.mp4...');
-sh(`gh release create "${tag}" "${REEL_PATH}" --title "${title}" --notes "${folderName}" --repo "${GH_REPO}"`);
-const videoUrl = `https://github.com/${GH_REPO}/releases/download/${tag}/reel.mp4`;
-log(`video_url: ${videoUrl}`);
+// ─── 1. Upload media as a GitHub Release asset (public URL for Meta) ────────
+log('Creating GitHub Release...');
+sh(`gh release create "${tag}" "${mediaPath}" --title "${title}" --notes "${folderName}" --repo "${GH_REPO}"`);
+const mediaUrl = `https://github.com/${GH_REPO}/releases/download/${tag}/${fileName}`;
+log(`${urlField}: ${mediaUrl}`);
 
 if (skipPublish) {
-  log('--skip-publish set — stopping after release upload. Release URL above.');
+  log('--skip-publish set — stopping after release upload.');
   process.exit(0);
 }
 
 // ─── 2. Create media container ──────────────────────────────────────────────
 log('POSTing to /media (create container)...');
 const params = new URLSearchParams({
-  media_type: 'REELS',
-  video_url: videoUrl,
+  media_type: mediaType,
+  [urlField]: mediaUrl,
   caption,
-  thumb_offset: String(thumbOffsetMs),
   access_token: IG_ACCESS_TOKEN,
 });
+if (mediaType === 'REELS') {
+  params.append('thumb_offset', String(thumbOffsetMs));
+}
 const createRes = await fetch(`https://graph.facebook.com/v21.0/${IG_USER_ID}/media`, {
   method: 'POST',
   body: params,
@@ -102,11 +112,12 @@ if (!createRes.ok || !createJson.id) {
 const creationId = createJson.id;
 log(`creation_id: ${creationId}`);
 
-// ─── 3. Poll until FINISHED ─────────────────────────────────────────────────
+// ─── 3. Poll until FINISHED (images usually within ~5s, reels 30-90s) ───────
 log('Polling status...');
-const deadline = Date.now() + 300_000; // 5 min hard cap
+const pollMaxMs = mediaType === 'IMAGE' ? 60_000 : 300_000;
+const deadline = Date.now() + pollMaxMs;
 while (Date.now() < deadline) {
-  await sleep(5000);
+  await sleep(mediaType === 'IMAGE' ? 3000 : 5000);
   const statusRes = await fetch(
     `https://graph.facebook.com/v21.0/${creationId}?fields=status_code,status&access_token=${IG_ACCESS_TOKEN}`,
   );
@@ -135,4 +146,10 @@ if (!pubRes.ok || !pubJson.id) {
   process.exit(1);
 }
 log(`✅ Published media_id: ${pubJson.id}`);
-log(`   IG URL probably: https://www.instagram.com/reel/<shortcode>/  (use Graph API permalink endpoint to resolve)`);
+
+// Try to resolve permalink
+try {
+  const permRes = await fetch(`https://graph.facebook.com/v21.0/${pubJson.id}?fields=permalink&access_token=${IG_ACCESS_TOKEN}`);
+  const perm = await permRes.json();
+  if (perm.permalink) log(`   IG URL: ${perm.permalink}`);
+} catch (e) {}
