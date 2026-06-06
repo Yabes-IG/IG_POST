@@ -56,15 +56,23 @@ const REPO = process.env.GITHUB_REPOSITORY || 'Yabes-IG/IG_POST';
 const rawUrl = `https://raw.githubusercontent.com/${REPO}/${branchArg}/${FOLDER}/image.png`;
 
 const PROMPT = [
-  'Enhance this image to professional commercial photography quality.',
-  'Keep the EXACT same composition, layout, person identity, text, branding, logo, and colors.',
-  'Improve only: sharpness, micro-detail, lighting balance, color depth, edge clarity, gradient smoothness.',
-  'Preserve the Indonesian woman face features and expression identically.',
-  'Preserve all five feature bullet checkmarks and their text legibility exactly:',
-  '"Property Management System / Residential Management", "Facility Management System",',
-  '"Automated Utility Billing System", "Integrated Accounting & Financial Software", "Mobile Apps".',
-  'Preserve the "vp+" logo and the title "Mau dapat semua ceklist dalam 1 Sistem?" exactly.',
-  'Output: high resolution PNG, 4K-equivalent quality, no composition changes.',
+  'CRITICAL CONSTRAINT — the Indonesian woman face must remain ABSOLUTELY IDENTICAL to the input image.',
+  'HARD FACE LOCK: same exact person, identical face structure, identical eye shape and color,',
+  'identical nose shape, identical lips, identical jawline, identical eyebrows, identical hairline,',
+  'identical skin tone, identical makeup, identical hair color and styling, identical earrings, identical necklace.',
+  'DO NOT modify, beautify, smooth, slim, or restyle the face in any way.',
+  'No skin smoothing, no face slimming, no expression change, no face re-rendering whatsoever.',
+  'Keep the EXACT same composition, body pose, hand position, blazer, blouse pattern,',
+  'background office scene with floor-to-ceiling windows, lighting direction, camera angle.',
+  'Keep the "vp+" logo pixel-identical. Keep the five feature checkmark bullets and the title',
+  '"Mau dapat semua ceklist dalam 1 Sistem?" pixel-identical, same text spacing, same fonts.',
+  'Five bullet labels MUST remain word-for-word: "Property Management System / Residential Management",',
+  '"Facility Management System", "Automated Utility Billing System",',
+  '"Integrated Accounting & Financial Software", "Mobile Apps".',
+  'Allowed improvements (background/UI only, NOT face): subtle micro-detail clarity on fabric texture,',
+  'slight color depth in the blue gradient cards, mild edge sharpness on rounded UI bullet boxes,',
+  'soft cleanup of any JPEG-like compression artifacts. Keep text crisp and readable.',
+  'Output: high resolution PNG, professional commercial photography quality, composition pixel-stable.',
 ].join(' ');
 
 const log = (...a) => console.log('[refine]', ...a);
