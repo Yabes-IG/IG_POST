@@ -1,0 +1,114 @@
+name: Post IG Reel
+
+# Cron only fires on the default branch (main). For staging-content publishing,
+# the cron job checks out the staging branch before running publish.js.
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 09:00 WIB daily (= 02:00 UTC)
+  workflow_dispatch:
+    inputs:
+      override_folder:
+        description: 'YYMMDD folder to publish (leave empty for today)'
+        required: false
+        default: ''
+      target:
+        description: 'Where to post'
+        type: choice
+        options:
+          - 'auto'
+          - 'sandbox'
+          - 'production'
+        default: 'auto'
+      skip_publish:
+        description: 'Build/upload Release but skip the Graph API call'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # for gh release create
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Environment selection priority:
+    # 1. Manual: target=production -> production env
+    # 2. Manual: target=sandbox    -> sandbox env
+    # 3. Cron (schedule) event     -> sandbox env (cron always to sandbox first)
+    # 4. Manual auto: branch=main  -> production env
+    # 5. Manual auto: any other branch -> sandbox env
+    environment: >-
+      ${{
+        github.event.inputs.target == 'production' && 'production'
+        || github.event.inputs.target == 'sandbox'   && 'sandbox'
+        || github.event_name        == 'schedule'    && 'sandbox'
+        || (github.ref_name == 'main' && 'production' || 'sandbox')
+      }}
+
+    steps:
+      - name: Checkout staging (for cron) or current ref (for manual)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'staging' || github.ref }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Determine target folder
+        id: pickfolder
+        env:
+          OVERRIDE: ${{ github.event.inputs.override_folder }}
+        run: |
+          set -e
+          if [ -n "$OVERRIDE" ]; then
+            DATE="$OVERRIDE"
+            echo "override mode: $DATE"
+          else
+            DATE=$(TZ=Asia/Jakarta date +%y%m%d)
+            echo "auto (today WIB): $DATE"
+          fi
+          FOLDER="IGPOST/$DATE"
+          if [ ! -d "$FOLDER" ]; then
+            echo "::warning::No content folder found for $DATE ($FOLDER) — skipping publish."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ ! -f "$FOLDER/reel.mp4" ]; then
+            echo "::error::Folder $FOLDER exists but missing reel.mp4 — failing."
+            exit 1
+          fi
+          if [ ! -f "$FOLDER/spec.json" ]; then
+            echo "::error::Folder $FOLDER exists but missing spec.json — failing."
+            exit 1
+          fi
+          echo "folder=$FOLDER" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Publish
+        if: steps.pickfolder.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+        run: |
+          ARGS="--folder=${{ steps.pickfolder.outputs.folder }}"
+          if [ "${{ github.event.inputs.skip_publish }}" = "true" ]; then
+            ARGS="$ARGS --skip-publish"
+          fi
+          node src/publish.js $ARGS
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Post IG Reel" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch (checkout): \`${{ github.event_name == 'schedule' && 'staging' || github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Event: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Folder: \`${{ steps.pickfolder.outputs.folder || 'none (skipped)' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: \`${{ job.environment || 'n/a' }}\`" >> $GITHUB_STEP_SUMMARY

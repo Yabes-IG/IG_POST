@@ -1,0 +1,13 @@
+{
+  "name": "ig-post-daily",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daily IG Reels publisher — pre-rendered MP4 + caption per dated folder under IGPOST/YYMMDD/",
+  "scripts": {
+    "publish": "node src/publish.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
